@@ -94,7 +94,6 @@ void client(int idx) {
 }
 
 int main() {
-  thisptr::net::initialize();
 
   std::vector<std::thread> threads;
   for (int i = 0; i < 5; ++i) {
@@ -113,6 +112,5 @@ int main() {
     t.join();
   }
 
-  thisptr::net::cleanup();
   return 0;
 }

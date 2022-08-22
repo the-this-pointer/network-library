@@ -5,18 +5,10 @@
 #include <mutex>
 #include <condition_variable>
 #include <thread>
-#include <net_win.h>
+#include <net_p.h>
 
 namespace thisptr {
   namespace net {
-
-    static int initialize() {
-      return thisptr::net_p::initialize();
-    }
-
-    static int cleanup() {
-      return thisptr::net_p::cleanup();
-    }
 
     class Socket {
     public:
@@ -30,20 +22,36 @@ namespace thisptr {
 
     class TcpSocket : public Socket {
     public:
-      TcpSocket() : m_sock(-1) {}
-      explicit TcpSocket(unsigned long long sock) : m_sock(sock) {}
+      TcpSocket() : TcpSocket(-1) {}
+      explicit TcpSocket(unsigned long long sock) : m_sock(sock) {
+        thisptr::net_p::initialize();
+      }
 
       virtual ~TcpSocket() {
         if (m_sock != -1)
           thisptr::net_p::close(m_sock);
+        thisptr::net_p::cleanup();
       }
 
       int recv(char* buf, int len) override {
-        return thisptr::net_p::recv(m_sock, buf, len);
+        int iRes = thisptr::net_p::recv(m_sock, buf, len);
+        if ( iRes < 0 ) {
+          thisptr::net_p::NetSocketError err = thisptr::net_p::lastError();
+          if (err == thisptr::net_p::NETE_Wouldblock)
+            return thisptr::net_p::NETE_Success;
+          close();
+          return err;
+        } else if ( iRes == 0 )
+          return thisptr::net_p::NETE_Notconnected;
+        return iRes;
       }
 
       int send(const char* buf) override {
-        return thisptr::net_p::send(m_sock, buf);
+        int iRes = thisptr::net_p::send(m_sock, buf);
+        if (iRes == thisptr::net_p::NETE_SocketError) {
+          close();
+        }
+        return iRes;
       }
 
       bool close() override {
@@ -63,7 +71,6 @@ namespace thisptr {
       }
 
     protected:
-
       bool setTimeout(unsigned long long sock, int opt, int val) {
         struct timeval timeout;
         timeout.tv_sec = val;
@@ -92,12 +99,12 @@ namespace thisptr {
         m_address = address;
         m_port = port;
         int res = thisptr::net_p::connect(m_sock, m_address.c_str(), m_port.c_str());
-        bool bRes = (res != -1 && m_sock != INVALID_SOCKET);
-        if (bRes) {
+        if (res != thisptr::net_p::NETE_SocketError) {
           setTimeout(SO_RCVTIMEO, 5000);
           setTimeout(SO_SNDTIMEO, 5000);
+          return true;
         }
-        return bRes;
+        return false;
       }
 
     private:
@@ -116,17 +123,17 @@ namespace thisptr {
       bool bind(const std::string& address, const std::string& port) {
         m_address = address;
         m_port = port;
-        int res = thisptr::net_p::listen(m_sock, m_address.c_str(), m_port.c_str());
-        bool bRes = (res != -1 && m_sock != INVALID_SOCKET);
+        int err = thisptr::net_p::listen(m_sock, m_address.c_str(), m_port.c_str());
+        bool bRes = (err == thisptr::net_p::NETE_Success && m_sock != INVALID_SOCKET);
 
-        m_stopThread = std::thread(&TcpServer::stopRunnable, this);
+        if (bRes) m_stopThread = std::thread(&TcpServer::stopRunnable, this);
 
         return bRes;
       }
 
       TcpSocket* accept() {
         unsigned long long sock = thisptr::net_p::accept(m_sock);
-        if (sock == INVALID_SOCKET)
+        if (sock == INVALID_SOCKET || thisptr::net_p::lastError() == thisptr::net_p::NETE_Wouldblock)
           return nullptr;
 
         setTimeout(sock, SO_RCVTIMEO, 5000);
