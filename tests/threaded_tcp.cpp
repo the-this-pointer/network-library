@@ -69,7 +69,14 @@ void client(int idx) {
 
 int main() {
   std::vector<std::thread> threads;
-  s.start("127.0.0.1", "7232", onMessageCallback);
+  s.setConnectCallback([](const std::shared_ptr<thisptr::net::TcpSocket>& conn){
+    std::cout << "new connection!!" << std::endl;
+  });
+  s.setDisconnectCallback([](const std::shared_ptr<thisptr::net::TcpSocket>& conn){
+    std::cout << "client disconnected!!" << std::endl;
+  });
+  s.setMessageCallback(onMessageCallback);
+  s.start("127.0.0.1", "7232");
 
   for (int i = 0; i < 4; ++i) {
     if (i == 0)

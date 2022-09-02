@@ -66,6 +66,8 @@ namespace thisptr {
 
       void operator() ();
 
+      void setConnectCallback(OnConnectCallback connectCallback);
+      void setDisconnectCallback(OnConnectCallback disconnectCallback);
       void setMessageCallback(OnMessageCallback messageCallback);
       void setTcpServer(TcpServer* server);
       void setTcpConn(std::shared_ptr<net::TcpSocket>& conn);
@@ -85,7 +87,10 @@ namespace thisptr {
 
       bool bind(const std::string& address, const std::string& port);
       std::shared_ptr<TcpSocket> accept();
-      void start(const std::string& address, const std::string& port, OnMessageCallback messageCallback);
+      void setConnectCallback(OnConnectCallback connectCallback);
+      void setDisconnectCallback(OnConnectCallback disconnectCallback);
+      void setMessageCallback(OnMessageCallback messageCallback);
+      void start(const std::string& address, const std::string& port);
       void stop();
       utils::Pool<ConnectionHandler, TcpServer *> *pool() const;
 
@@ -101,6 +106,10 @@ namespace thisptr {
       utils::Pool<ConnectionHandler, TcpServer*>* m_pool;
       std::string m_address;
       std::string m_port;
+
+      OnConnectCallback m_connectCallback{};
+      OnConnectCallback m_disconnectCallback{};
+      OnMessageCallback m_messageCallback{};
     };
   }
 }

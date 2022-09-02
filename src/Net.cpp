@@ -83,6 +83,7 @@ void thisptr::net::ConnectionHandler::operator()() {
     int res = m_conn->recv(buffer, 256);
     if (res < 0 && res != thisptr::net_p::NETE_Notconnected) {
       std::cout << " : error occured" << std::endl;
+      if (m_disconnectCallback) m_disconnectCallback(m_conn);
       break;
     } else if (res == thisptr::net_p::NETE_Notconnected) {
       std::cout << " : connection closed" << std::endl;
@@ -94,6 +95,14 @@ void thisptr::net::ConnectionHandler::operator()() {
     if (m_messageCallback) m_messageCallback(m_conn, recData);
   }
   m_server->pool()->push(this);
+}
+
+void thisptr::net::ConnectionHandler::setConnectCallback(thisptr::net::OnConnectCallback connectCallback) {
+  m_connectCallback = connectCallback;
+}
+
+void thisptr::net::ConnectionHandler::setDisconnectCallback(thisptr::net::OnConnectCallback disconnectCallback) {
+  m_disconnectCallback = disconnectCallback;
 }
 
 void thisptr::net::ConnectionHandler::setMessageCallback(thisptr::net::OnMessageCallback messageCallback) {
@@ -136,12 +145,25 @@ std::shared_ptr<thisptr::net::TcpSocket> thisptr::net::TcpServer::accept() {
   return std::make_shared<TcpSocket>(sock);
 }
 
-void thisptr::net::TcpServer::start(const std::string &address, const std::string &port,
-                                    thisptr::net::OnMessageCallback messageCallback) {
+void thisptr::net::TcpServer::setConnectCallback(thisptr::net::OnConnectCallback connectCallback) {
+  m_connectCallback = connectCallback;
+}
+
+void thisptr::net::TcpServer::setDisconnectCallback(thisptr::net::OnConnectCallback disconnectCallback) {
+  m_disconnectCallback = disconnectCallback;
+}
+
+void thisptr::net::TcpServer::setMessageCallback(thisptr::net::OnMessageCallback messageCallback) {
+  m_messageCallback = messageCallback;
+}
+
+void thisptr::net::TcpServer::start(const std::string &address, const std::string &port) {
   m_pool = new utils::Pool<ConnectionHandler, TcpServer*>([=](TcpServer* server){
     auto h = new ConnectionHandler();
     h->setTcpServer(server);
-    h->setMessageCallback(messageCallback);
+    h->setConnectCallback(m_connectCallback);
+    h->setDisconnectCallback(m_disconnectCallback);
+    h->setMessageCallback(m_messageCallback);
     return h;
   }, [=](ConnectionHandler* h){
     delete h;
