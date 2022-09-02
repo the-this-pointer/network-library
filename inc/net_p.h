@@ -26,19 +26,19 @@ namespace thisptr {
     typedef enum
     {
       NETE_SocketError = -1,
+      NETE_InvalidSocket = -2,
+      NETE_InvalidAddress = -3,
+      NETE_ConnectionRefused = -4,
+      NETE_Timedout = -5,
+      NETE_Wouldblock = -6,
+      NETE_Notconnected = -7,
+      NETE_Inprogress = -8,
+      NETE_Interrupted = -9,
+      NETE_ConnectionAborted = -10,
+      NETE_ConnectionReset = -11,
+      NETE_AddressInUse = -12,
+      NETE_Unknown = -13,
       NETE_Success = 0,
-      NETE_InvalidSocket,
-      NETE_InvalidAddress,
-      NETE_ConnectionRefused,
-      NETE_Timedout,
-      NETE_Wouldblock,
-      NETE_Notconnected,
-      NETE_Inprogress,
-      NETE_Interrupted,
-      NETE_ConnectionAborted,
-      NETE_ConnectionReset,
-      NETE_AddressInUse,
-      NETE_Unknown
     } NetSocketError;
 
 #if defined(WIN32) || defined(WIN64)

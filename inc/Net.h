@@ -1,10 +1,14 @@
 #ifndef NetLib_TCPCONNECTION_H
 #define NetLib_TCPCONNECTION_H
 
+#include <iostream>
+#include <sstream>
+#include <memory>
 #include <string>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
+#include <utility>
 #include <net_p.h>
 
 namespace thisptr {
@@ -131,14 +135,14 @@ namespace thisptr {
         return bRes;
       }
 
-      TcpSocket* accept() {
+      std::shared_ptr<TcpSocket> accept() {
         unsigned long long sock = thisptr::net_p::accept(m_sock);
         if (sock == INVALID_SOCKET || thisptr::net_p::lastError() == thisptr::net_p::NETE_Wouldblock)
           return nullptr;
 
         setTimeout(sock, SO_RCVTIMEO, 5000);
         setTimeout(sock, SO_SNDTIMEO, 5000);
-        return new TcpSocket(sock);
+        return std::make_shared<TcpSocket>(sock);
       }
 
       void stop() {
@@ -162,6 +166,40 @@ namespace thisptr {
       std::string m_port;
     };
   }
+
+  typedef void(*OnMessageCallback)(const std::shared_ptr<net::TcpSocket>& conn, const std::string& message);
+
+  class ConnectionHandler {
+  public:
+    explicit ConnectionHandler(std::shared_ptr<net::TcpSocket> conn): m_conn(std::move(conn)) {};
+    ~ConnectionHandler() = default;
+
+    void operator() () {
+      while(true) {
+        char buffer[256] = {0};
+        int res = m_conn->recv(buffer, 256);
+        if (res < 0 && res != thisptr::net_p::NETE_Notconnected) {
+          std::cout << " : error occured" << std::endl;
+          break;
+        } else if (res == thisptr::net_p::NETE_Notconnected) {
+          std::cout << " : connection closed" << std::endl;
+          break;
+        }
+
+        std::string recData(buffer, 256);
+        if (m_messageCallback) m_messageCallback(m_conn, recData);
+      }
+    }
+
+    void setMessageCallback(OnMessageCallback messageCallback) {
+      m_messageCallback = messageCallback;
+    }
+
+  private:
+    std::shared_ptr<net::TcpSocket> m_conn;
+    OnMessageCallback m_messageCallback{};
+
+  };
 }
 
 #endif //NetLib_TCPCONNECTION_H
