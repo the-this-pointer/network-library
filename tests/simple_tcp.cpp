@@ -26,7 +26,7 @@ void server() {
   char buffer[256] = {0};
 
   while(true) {
-    TcpSocket* conn = s.accept();
+    auto conn = s.accept();
     if (conn == nullptr) {
       std::cout << "s : unable to accept connection" << std::endl;
       break;
@@ -55,8 +55,6 @@ void server() {
       std::cout << "s" << counter << " : unable to close socket" << std::endl;
       break;
     }
-
-    delete conn;
   }
 }
 
