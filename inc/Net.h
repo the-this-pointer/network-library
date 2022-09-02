@@ -3,13 +3,14 @@
 
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <memory>
 #include <string>
 #include <mutex>
 #include <condition_variable>
-#include <thread>
 #include <utility>
 #include <net_p.h>
+#include <Pool.h>
 
 namespace thisptr {
   namespace net {
@@ -116,12 +117,49 @@ namespace thisptr {
       std::string m_port;
     };
 
+
+    typedef void(*OnMessageCallback)(const std::shared_ptr<net::TcpSocket>& conn, const std::string& message);
+
+    class ConnectionHandler {
+    public:
+      explicit ConnectionHandler(std::shared_ptr<net::TcpSocket> conn): m_conn(std::move(conn)) {};
+      ~ConnectionHandler() = default;
+
+      void operator() () {
+        while(true) {
+          char buffer[256] = {0};
+          int res = m_conn->recv(buffer, 256);
+          if (res < 0 && res != thisptr::net_p::NETE_Notconnected) {
+            std::cout << " : error occured" << std::endl;
+            break;
+          } else if (res == thisptr::net_p::NETE_Notconnected) {
+            std::cout << " : connection closed" << std::endl;
+            break;
+          }
+
+          std::string recData(buffer, 256);
+          if (m_messageCallback) m_messageCallback(m_conn, recData);
+        }
+      }
+
+      void setMessageCallback(OnMessageCallback messageCallback) {
+        m_messageCallback = messageCallback;
+      }
+
+    private:
+      std::shared_ptr<net::TcpSocket> m_conn;
+      OnMessageCallback m_messageCallback{};
+
+    };
+
     class TcpServer: public TcpSocket {
     public:
       TcpServer(): TcpSocket() {}
       virtual ~TcpServer() {
         if (m_stopThread.joinable())
           m_stopThread.join();
+        if (m_serverThread.joinable())
+          m_serverThread.join();
       }
 
       bool bind(const std::string& address, const std::string& port) {
@@ -145,6 +183,41 @@ namespace thisptr {
         return std::make_shared<TcpSocket>(sock);
       }
 
+      void start (const std::string& address, const std::string& port, OnMessageCallback messageCallback) {
+        m_serverThread = std::thread([=](){
+          utils::Pool<ConnectionHandler, std::shared_ptr<TcpSocket>> pool([=](std::shared_ptr<TcpSocket> conn){
+            auto h = new ConnectionHandler(std::move(conn));
+            h->setMessageCallback(messageCallback);
+            return h;
+          }, [=](ConnectionHandler* h){
+            delete h;
+          }, 3);
+
+          if (!bind(address, port))
+          {
+            std::cout << "s : unable to bind to host" << std::endl;
+            return;
+          }
+
+          while(true) {
+            auto conn = accept();
+            if (conn == nullptr) {
+              std::cout << "s : unable to accept connection" << std::endl;
+              break;
+            }
+
+            if (pool.isEmpty()) {
+              std::cout << "s : server is busy, unable to accept connection!" << std::endl;
+              conn->close();
+              continue;
+            }
+            auto* h = pool.pop(0, std::move(conn));
+            std::thread(*h).detach();
+          }
+          });
+        m_serverThread.detach();
+      }
+
       void stop() {
         m_stopRequested = true;
         m_stopCv.notify_all();
@@ -158,6 +231,7 @@ namespace thisptr {
       }
 
       bool m_stopRequested = false;
+      std::thread m_serverThread;
       std::thread m_stopThread;
       std::mutex m_stopMutex;
       std::condition_variable m_stopCv;
@@ -166,40 +240,6 @@ namespace thisptr {
       std::string m_port;
     };
   }
-
-  typedef void(*OnMessageCallback)(const std::shared_ptr<net::TcpSocket>& conn, const std::string& message);
-
-  class ConnectionHandler {
-  public:
-    explicit ConnectionHandler(std::shared_ptr<net::TcpSocket> conn): m_conn(std::move(conn)) {};
-    ~ConnectionHandler() = default;
-
-    void operator() () {
-      while(true) {
-        char buffer[256] = {0};
-        int res = m_conn->recv(buffer, 256);
-        if (res < 0 && res != thisptr::net_p::NETE_Notconnected) {
-          std::cout << " : error occured" << std::endl;
-          break;
-        } else if (res == thisptr::net_p::NETE_Notconnected) {
-          std::cout << " : connection closed" << std::endl;
-          break;
-        }
-
-        std::string recData(buffer, 256);
-        if (m_messageCallback) m_messageCallback(m_conn, recData);
-      }
-    }
-
-    void setMessageCallback(OnMessageCallback messageCallback) {
-      m_messageCallback = messageCallback;
-    }
-
-  private:
-    std::shared_ptr<net::TcpSocket> m_conn;
-    OnMessageCallback m_messageCallback{};
-
-  };
 }
 
 #endif //NetLib_TCPCONNECTION_H

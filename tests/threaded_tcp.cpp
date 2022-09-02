@@ -31,38 +31,6 @@ void stopServer() {
   s.stop();
 }
 
-void server() {
-  Pool<thisptr::ConnectionHandler, std::shared_ptr<TcpSocket>> pool([](std::shared_ptr<TcpSocket> conn){
-    auto h = new thisptr::ConnectionHandler(std::move(conn));
-    h->setMessageCallback(onMessageCallback);
-    return h;
-  }, [=](thisptr::ConnectionHandler* h){
-    delete h;
-  }, 3);
-
-  if (!s.bind("127.0.0.1", "7232"))
-  {
-    std::cout << "s : unable to bind to host" << std::endl;
-    return;
-  }
-
-  while(true) {
-    auto conn = s.accept();
-    if (conn == nullptr) {
-      std::cout << "s : unable to accept connection" << std::endl;
-      break;
-    }
-
-    if (pool.isEmpty()) {
-      std::cout << "s : server is busy, unable to accept connection!" << std::endl;
-      conn->close();
-      continue;
-    }
-    auto* h = pool.pop(0, std::move(conn));
-    std::thread(*h).detach();
-  }
-}
-
 void client(int idx) {
   TcpClient c;
   if (!c.connect("127.0.0.1", "7232"))
@@ -101,12 +69,11 @@ void client(int idx) {
 
 int main() {
   std::vector<std::thread> threads;
-  for (int i = 0; i < 6; ++i) {
+  s.start("127.0.0.1", "7232", onMessageCallback);
+
+  for (int i = 0; i < 4; ++i) {
     if (i == 0)
     {
-      threads.emplace_back([&, i](){ server();});
-      continue;
-    } else if (i == 1) {
       threads.emplace_back([&, i](){ stopServer();});
       continue;
     }
