@@ -59,22 +59,34 @@ namespace thisptr {
     typedef void(*OnConnectCallback)(const std::shared_ptr<net::TcpSocket>& conn);
     typedef void(*OnMessageCallback)(const std::shared_ptr<net::TcpSocket>& conn, const std::string& message);
 
-    class ConnectionHandler {
+    class ConnectionHandlerBase {
     public:
-      explicit ConnectionHandler(std::shared_ptr<net::TcpSocket> conn = nullptr): m_conn(std::move(conn)) {};
+      void operator() ();
+
+      virtual void onConnect() {};
+      virtual void onDisconnect() {};
+      virtual void onMessage(std::string data) {};
+
+      void setTcpServer(TcpServer* server);
+      void setTcpConn(std::shared_ptr<net::TcpSocket>& conn);
+    protected:
+      TcpServer* m_server{};
+      std::shared_ptr<net::TcpSocket> m_conn{};
+    };
+
+    class ConnectionHandler: public ConnectionHandlerBase {
+    public:
+      explicit ConnectionHandler() = default;
       ~ConnectionHandler() = default;
 
-      void operator() ();
+      void onConnect() override;
+      void onDisconnect() override;
+      void onMessage(std::string data) override;
 
       void setConnectCallback(OnConnectCallback connectCallback);
       void setDisconnectCallback(OnConnectCallback disconnectCallback);
       void setMessageCallback(OnMessageCallback messageCallback);
-      void setTcpServer(TcpServer* server);
-      void setTcpConn(std::shared_ptr<net::TcpSocket>& conn);
 
-    private:
-      TcpServer* m_server{};
-      std::shared_ptr<net::TcpSocket> m_conn{};
       OnConnectCallback m_connectCallback{};
       OnConnectCallback m_disconnectCallback{};
       OnMessageCallback m_messageCallback{};
@@ -87,14 +99,11 @@ namespace thisptr {
 
       bool bind(const std::string& address, const std::string& port);
       std::shared_ptr<TcpSocket> accept();
-      void setConnectCallback(OnConnectCallback connectCallback);
-      void setDisconnectCallback(OnConnectCallback disconnectCallback);
-      void setMessageCallback(OnMessageCallback messageCallback);
       void start(const std::string& address, const std::string& port);
       void stop();
-      utils::Pool<ConnectionHandler, TcpServer *> *pool() const;
 
-    private:
+    protected:
+      virtual ConnectionHandlerBase* prepareHandler();
       void stopRunnable();
 
       bool m_stopRequested = false;
@@ -103,9 +112,18 @@ namespace thisptr {
       std::mutex m_stopMutex;
       std::condition_variable m_stopCv;
 
-      utils::Pool<ConnectionHandler, TcpServer*>* m_pool;
       std::string m_address;
       std::string m_port;
+
+    };
+
+    class TcpServerCallback: public TcpServer {
+    public:
+      void setConnectCallback(OnConnectCallback connectCallback);
+      void setDisconnectCallback(OnConnectCallback disconnectCallback);
+      void setMessageCallback(OnMessageCallback messageCallback);
+    protected:
+      virtual ConnectionHandlerBase* prepareHandler();
 
       OnConnectCallback m_connectCallback{};
       OnConnectCallback m_disconnectCallback{};

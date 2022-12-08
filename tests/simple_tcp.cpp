@@ -7,7 +7,7 @@
 
 using namespace thisptr::net;
 
-TcpServer s;
+TcpServerCallback s;
 
 void stopServer() {
   // stop server after 10 seconds

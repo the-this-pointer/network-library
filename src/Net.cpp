@@ -75,26 +75,31 @@ bool thisptr::net::TcpClient::connect(const std::string &address, const std::str
   return false;
 }
 
-void thisptr::net::ConnectionHandler::operator()() {
-  if (m_connectCallback) m_connectCallback(m_conn);
-
+void thisptr::net::ConnectionHandlerBase::operator()() {
+  onConnect();
   while(true) {
     char buffer[256] = {0};
     int res = m_conn->recv(buffer, 256);
     if (res < 0 && res != thisptr::net_p::NETE_Notconnected) {
       std::cout << " : error occured" << std::endl;
-      if (m_disconnectCallback) m_disconnectCallback(m_conn);
       break;
     } else if (res == thisptr::net_p::NETE_Notconnected) {
       std::cout << " : connection closed" << std::endl;
-      if (m_disconnectCallback) m_disconnectCallback(m_conn);
       break;
+    } else {
+      std::string data(buffer, 256);
+      onMessage(data);
     }
-
-    std::string recData(buffer, 256);
-    if (m_messageCallback) m_messageCallback(m_conn, recData);
   }
-  m_server->pool()->push(this);
+  onDisconnect();
+}
+
+void thisptr::net::ConnectionHandlerBase::setTcpServer(thisptr::net::TcpServer *server) {
+  m_server = server;
+}
+
+void thisptr::net::ConnectionHandlerBase::setTcpConn(std::shared_ptr<net::TcpSocket>& conn) {
+  m_conn = conn;
 }
 
 void thisptr::net::ConnectionHandler::setConnectCallback(thisptr::net::OnConnectCallback connectCallback) {
@@ -109,12 +114,16 @@ void thisptr::net::ConnectionHandler::setMessageCallback(thisptr::net::OnMessage
   m_messageCallback = messageCallback;
 }
 
-void thisptr::net::ConnectionHandler::setTcpServer(thisptr::net::TcpServer *server) {
-  m_server = server;
+void thisptr::net::ConnectionHandler::onConnect() {
+  if (m_connectCallback) m_connectCallback(m_conn);
 }
 
-void thisptr::net::ConnectionHandler::setTcpConn(std::shared_ptr<net::TcpSocket>& conn) {
-  m_conn = conn;
+void thisptr::net::ConnectionHandler::onDisconnect() {
+  if (m_disconnectCallback) m_disconnectCallback(m_conn);
+}
+
+void thisptr::net::ConnectionHandler::onMessage(std::string data) {
+  if (m_messageCallback) m_messageCallback(m_conn, data);
 }
 
 thisptr::net::TcpServer::~TcpServer() {
@@ -145,30 +154,7 @@ std::shared_ptr<thisptr::net::TcpSocket> thisptr::net::TcpServer::accept() {
   return std::make_shared<TcpSocket>(sock);
 }
 
-void thisptr::net::TcpServer::setConnectCallback(thisptr::net::OnConnectCallback connectCallback) {
-  m_connectCallback = connectCallback;
-}
-
-void thisptr::net::TcpServer::setDisconnectCallback(thisptr::net::OnConnectCallback disconnectCallback) {
-  m_disconnectCallback = disconnectCallback;
-}
-
-void thisptr::net::TcpServer::setMessageCallback(thisptr::net::OnMessageCallback messageCallback) {
-  m_messageCallback = messageCallback;
-}
-
 void thisptr::net::TcpServer::start(const std::string &address, const std::string &port) {
-  m_pool = new utils::Pool<ConnectionHandler, TcpServer*>([=](TcpServer* server){
-    auto h = new ConnectionHandler();
-    h->setTcpServer(server);
-    h->setConnectCallback(m_connectCallback);
-    h->setDisconnectCallback(m_disconnectCallback);
-    h->setMessageCallback(m_messageCallback);
-    return h;
-  }, [=](ConnectionHandler* h){
-    delete h;
-  }, 3);
-
   m_serverThread = std::thread([=](){
     if (!bind(address, port))
     {
@@ -183,17 +169,17 @@ void thisptr::net::TcpServer::start(const std::string &address, const std::strin
         break;
       }
 
-      if (m_pool->isEmpty()) {
-        std::cout << "s : server is busy, unable to accept connection!" << std::endl;
-        conn->close();
-        continue;
-      }
-      auto* h = m_pool->pop(0, this);
+      ConnectionHandlerBase* h = prepareHandler();
       h->setTcpConn(conn);
+
       std::thread(*h).detach();
     }
   });
   m_serverThread.detach();
+}
+
+thisptr::net::ConnectionHandlerBase *thisptr::net::TcpServer::prepareHandler() {
+  return nullptr;
 }
 
 void thisptr::net::TcpServer::stop() {
@@ -201,12 +187,29 @@ void thisptr::net::TcpServer::stop() {
   m_stopCv.notify_all();
 }
 
-thisptr::utils::Pool<thisptr::net::ConnectionHandler, thisptr::net::TcpServer *> *thisptr::net::TcpServer::pool() const {
-  return m_pool;
-}
-
 void thisptr::net::TcpServer::stopRunnable() {
   std::unique_lock<std::mutex> lk(m_stopMutex);
   m_stopCv.wait(lk, [=]{ return m_stopRequested; });
   thisptr::net_p::close(m_sock);
+}
+
+thisptr::net::ConnectionHandlerBase *thisptr::net::TcpServerCallback::prepareHandler() {
+  auto h = new ConnectionHandler();
+  h->setTcpServer(this);
+  h->setConnectCallback(m_connectCallback);
+  h->setDisconnectCallback(m_disconnectCallback);
+  h->setMessageCallback(m_messageCallback);
+  return h;
+}
+
+void thisptr::net::TcpServerCallback::setConnectCallback(thisptr::net::OnConnectCallback connectCallback) {
+  m_connectCallback = connectCallback;
+}
+
+void thisptr::net::TcpServerCallback::setDisconnectCallback(thisptr::net::OnConnectCallback disconnectCallback) {
+  m_disconnectCallback = disconnectCallback;
+}
+
+void thisptr::net::TcpServerCallback::setMessageCallback(thisptr::net::OnMessageCallback messageCallback) {
+  m_messageCallback = messageCallback;
 }

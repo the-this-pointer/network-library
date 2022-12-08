@@ -9,7 +9,7 @@
 using namespace thisptr::utils;
 using namespace thisptr::net;
 
-TcpServer s;
+TcpServerCallback s;
 
 void onMessageCallback(const std::shared_ptr<thisptr::net::TcpSocket>& conn, const std::string& message) {
   std::cout << " : rec data:" << message << std::endl;
