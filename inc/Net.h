@@ -55,56 +55,120 @@ namespace thisptr {
       std::string m_port;
     };
 
-    class TcpServer;
-    typedef void(*OnConnectCallback)(const std::shared_ptr<net::TcpSocket>& conn);
-    typedef void(*OnMessageCallback)(const std::shared_ptr<net::TcpSocket>& conn, const std::string& message);
+    class TcpServerBase {
+
+    };
 
     class ConnectionHandlerBase {
     public:
       void operator() ();
 
-      virtual void onConnect() {};
-      virtual void onDisconnect() {};
-      virtual void onMessage(std::string data) {};
+      virtual void onConnect();
+      virtual void onDisconnect();
+      virtual void onMessage(std::string data);
 
-      void setTcpServer(TcpServer* server);
+      void setTcpServer(TcpServerBase* server);
       void setTcpConn(std::shared_ptr<net::TcpSocket>& conn);
     protected:
-      TcpServer* m_server{};
+      TcpServerBase* m_server {};
       std::shared_ptr<net::TcpSocket> m_conn{};
     };
 
-    class ConnectionHandler: public ConnectionHandlerBase {
-    public:
-      explicit ConnectionHandler() = default;
-      ~ConnectionHandler() = default;
-
-      void onConnect() override;
-      void onDisconnect() override;
-      void onMessage(std::string data) override;
-
-      void setConnectCallback(OnConnectCallback connectCallback);
-      void setDisconnectCallback(OnConnectCallback disconnectCallback);
-      void setMessageCallback(OnMessageCallback messageCallback);
-
-      OnConnectCallback m_connectCallback{};
-      OnConnectCallback m_disconnectCallback{};
-      OnMessageCallback m_messageCallback{};
-    };
-
-    class TcpServer: public TcpSocket {
+    template <typename T>
+    class TcpServer: public TcpServerBase, public TcpSocket {
     public:
       TcpServer(): TcpSocket() {}
-      virtual ~TcpServer();
 
-      bool bind(const std::string& address, const std::string& port);
-      std::shared_ptr<TcpSocket> accept();
-      void start(const std::string& address, const std::string& port);
-      void stop();
+      virtual ~TcpServer() {
+        if (m_stopThread.joinable())
+          m_stopThread.join();
+        if (m_serverThread.joinable())
+          m_serverThread.join();
+      }
+
+      bool bind(const std::string& address, const std::string& port) {
+        m_address = address;
+        m_port = port;
+        int err = thisptr::net_p::listen(m_sock, m_address.c_str(), m_port.c_str());
+        bool bRes = (err == thisptr::net_p::NETE_Success && m_sock != INVALID_SOCKET);
+
+        if (bRes) m_stopThread = std::thread(&TcpServer::stopRunnable, this);
+
+        return bRes;
+      }
+
+      std::shared_ptr<TcpSocket> accept() {
+        unsigned long long sock = thisptr::net_p::accept(m_sock);
+        if (sock == INVALID_SOCKET || thisptr::net_p::lastError() == thisptr::net_p::NETE_Wouldblock)
+          return nullptr;
+
+        setTimeout(sock, SO_RCVTIMEO, 5000);
+        setTimeout(sock, SO_SNDTIMEO, 5000);
+        return std::make_shared<TcpSocket>(sock);
+      }
+
+      void start(const std::string& address, const std::string& port) {
+        m_serverThread = std::thread([=](){
+          if (!bind(address, port))
+          {
+            std::cout << "s : unable to bind to host" << std::endl;
+            return;
+          }
+
+          while(true) {
+            auto conn = accept();
+            if (conn == nullptr) {
+              std::cout << "s : unable to accept connection" << std::endl;
+              break;
+            }
+
+            std::shared_ptr<T> h = newHandler();
+            if (!h)
+            {
+              conn->close();
+              std::cout << "s : cannot accept connection at this time!" << std::endl;
+              continue;
+            }
+            h->setTcpConn(conn);
+            h->setTcpServer(this);
+            std::thread(*h).detach();
+          }
+        });
+        m_serverThread.detach();
+      }
+
+      void stop() {
+        m_stopRequested = true;
+        m_stopCv.notify_all();
+      }
+
+      void setNewHandler(std::shared_ptr<T>(*newHandler)())
+      {
+        m_newHandlerCallback = newHandler;
+      }
+
+      std::shared_ptr<T> newHandler()
+      {
+        if (!m_newHandlerCallback)
+        {
+          std::cerr << "you need some initialization for your server!" << std::endl;
+          return nullptr;
+        }
+        return m_newHandlerCallback();
+      }
+
+      void removeHandler(std::shared_ptr<T> handler)
+      {
+        if (m_removeHandlerCallback)
+          m_removeHandlerCallback(handler);
+      }
 
     protected:
-      virtual ConnectionHandlerBase* prepareHandler();
-      void stopRunnable();
+      void stopRunnable() {
+        std::unique_lock<std::mutex> lk(m_stopMutex);
+        m_stopCv.wait(lk, [=]{ return m_stopRequested; });
+        thisptr::net_p::close(m_sock);
+      }
 
       bool m_stopRequested = false;
       std::thread m_serverThread;
@@ -115,19 +179,9 @@ namespace thisptr {
       std::string m_address;
       std::string m_port;
 
-    };
+      std::shared_ptr<T>(*m_newHandlerCallback)();
+      void(*m_removeHandlerCallback)(std::shared_ptr<T>);
 
-    class TcpServerCallback: public TcpServer {
-    public:
-      void setConnectCallback(OnConnectCallback connectCallback);
-      void setDisconnectCallback(OnConnectCallback disconnectCallback);
-      void setMessageCallback(OnMessageCallback messageCallback);
-    protected:
-      virtual ConnectionHandlerBase* prepareHandler();
-
-      OnConnectCallback m_connectCallback{};
-      OnConnectCallback m_disconnectCallback{};
-      OnMessageCallback m_messageCallback{};
     };
   }
 }

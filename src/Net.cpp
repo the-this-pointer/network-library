@@ -81,7 +81,7 @@ void thisptr::net::ConnectionHandlerBase::operator()() {
     char buffer[256] = {0};
     int res = m_conn->recv(buffer, 256);
     if (res < 0 && res != thisptr::net_p::NETE_Notconnected) {
-      std::cout << " : error occured" << std::endl;
+      std::cout << " : error occured, res: " << res << std::endl;
       break;
     } else if (res == thisptr::net_p::NETE_Notconnected) {
       std::cout << " : connection closed" << std::endl;
@@ -94,7 +94,7 @@ void thisptr::net::ConnectionHandlerBase::operator()() {
   onDisconnect();
 }
 
-void thisptr::net::ConnectionHandlerBase::setTcpServer(thisptr::net::TcpServer *server) {
+void thisptr::net::ConnectionHandlerBase::setTcpServer(thisptr::net::TcpServerBase *server) {
   m_server = server;
 }
 
@@ -102,114 +102,12 @@ void thisptr::net::ConnectionHandlerBase::setTcpConn(std::shared_ptr<net::TcpSoc
   m_conn = conn;
 }
 
-void thisptr::net::ConnectionHandler::setConnectCallback(thisptr::net::OnConnectCallback connectCallback) {
-  m_connectCallback = connectCallback;
+void thisptr::net::ConnectionHandlerBase::onConnect() {
 }
 
-void thisptr::net::ConnectionHandler::setDisconnectCallback(thisptr::net::OnConnectCallback disconnectCallback) {
-  m_disconnectCallback = disconnectCallback;
+void thisptr::net::ConnectionHandlerBase::onDisconnect() {
 }
 
-void thisptr::net::ConnectionHandler::setMessageCallback(thisptr::net::OnMessageCallback messageCallback) {
-  m_messageCallback = messageCallback;
-}
-
-void thisptr::net::ConnectionHandler::onConnect() {
-  if (m_connectCallback) m_connectCallback(m_conn);
-}
-
-void thisptr::net::ConnectionHandler::onDisconnect() {
-  if (m_disconnectCallback) m_disconnectCallback(m_conn);
-}
-
-void thisptr::net::ConnectionHandler::onMessage(std::string data) {
-  if (m_messageCallback) m_messageCallback(m_conn, data);
-}
-
-thisptr::net::TcpServer::~TcpServer() {
-  if (m_stopThread.joinable())
-    m_stopThread.join();
-  if (m_serverThread.joinable())
-    m_serverThread.join();
-}
-
-bool thisptr::net::TcpServer::bind(const std::string &address, const std::string &port) {
-  m_address = address;
-  m_port = port;
-  int err = thisptr::net_p::listen(m_sock, m_address.c_str(), m_port.c_str());
-  bool bRes = (err == thisptr::net_p::NETE_Success && m_sock != INVALID_SOCKET);
-
-  if (bRes) m_stopThread = std::thread(&TcpServer::stopRunnable, this);
-
-  return bRes;
-}
-
-std::shared_ptr<thisptr::net::TcpSocket> thisptr::net::TcpServer::accept() {
-  unsigned long long sock = thisptr::net_p::accept(m_sock);
-  if (sock == INVALID_SOCKET || thisptr::net_p::lastError() == thisptr::net_p::NETE_Wouldblock)
-    return nullptr;
-
-  setTimeout(sock, SO_RCVTIMEO, 5000);
-  setTimeout(sock, SO_SNDTIMEO, 5000);
-  return std::make_shared<TcpSocket>(sock);
-}
-
-void thisptr::net::TcpServer::start(const std::string &address, const std::string &port) {
-  m_serverThread = std::thread([=](){
-    if (!bind(address, port))
-    {
-      std::cout << "s : unable to bind to host" << std::endl;
-      return;
-    }
-
-    while(true) {
-      auto conn = accept();
-      if (conn == nullptr) {
-        std::cout << "s : unable to accept connection" << std::endl;
-        break;
-      }
-
-      ConnectionHandlerBase* h = prepareHandler();
-      h->setTcpConn(conn);
-
-      std::thread(*h).detach();
-    }
-  });
-  m_serverThread.detach();
-}
-
-thisptr::net::ConnectionHandlerBase *thisptr::net::TcpServer::prepareHandler() {
-  return nullptr;
-}
-
-void thisptr::net::TcpServer::stop() {
-  m_stopRequested = true;
-  m_stopCv.notify_all();
-}
-
-void thisptr::net::TcpServer::stopRunnable() {
-  std::unique_lock<std::mutex> lk(m_stopMutex);
-  m_stopCv.wait(lk, [=]{ return m_stopRequested; });
-  thisptr::net_p::close(m_sock);
-}
-
-thisptr::net::ConnectionHandlerBase *thisptr::net::TcpServerCallback::prepareHandler() {
-  auto h = new ConnectionHandler();
-  h->setTcpServer(this);
-  h->setConnectCallback(m_connectCallback);
-  h->setDisconnectCallback(m_disconnectCallback);
-  h->setMessageCallback(m_messageCallback);
-  return h;
-}
-
-void thisptr::net::TcpServerCallback::setConnectCallback(thisptr::net::OnConnectCallback connectCallback) {
-  m_connectCallback = connectCallback;
-}
-
-void thisptr::net::TcpServerCallback::setDisconnectCallback(thisptr::net::OnConnectCallback disconnectCallback) {
-  m_disconnectCallback = disconnectCallback;
-}
-
-void thisptr::net::TcpServerCallback::setMessageCallback(thisptr::net::OnMessageCallback messageCallback) {
-  m_messageCallback = messageCallback;
+void thisptr::net::ConnectionHandlerBase::onMessage(std::string data) {
+  std::cerr << "if you can read this, it means you should think about handling connections!" << std::endl;
 }
