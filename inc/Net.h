@@ -22,6 +22,7 @@ namespace thisptr {
 
       virtual int recv(char* buf, int len) = 0;
       virtual int send(const char* buf) = 0;
+      virtual int send(const char* buf, int len) = 0;
       virtual bool close() = 0;
     };
 
@@ -33,6 +34,7 @@ namespace thisptr {
 
       int recv(char* buf, int len) override;
       int send(const char* buf) override;
+      int send(const char* buf, int len) override;
       bool close() override;
       bool setTimeout(int opt, int val);
 

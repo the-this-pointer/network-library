@@ -135,8 +135,8 @@ int thisptr::net_p::setsockopt(SOCKET sock, int opt, const void *val, int size) 
   return ::setsockopt(sock, SOL_SOCKET, opt, s, size);
 }
 
-int thisptr::net_p::send(SOCKET sock, const char *buffer) {
-  int iResult = ::send( sock, buffer, (int)strlen(buffer), 0 );
+int thisptr::net_p::send(SOCKET sock, const char *buffer, int len) {
+  int iResult = ::send( sock, buffer, len, 0 );
   return iResult;
 }
 

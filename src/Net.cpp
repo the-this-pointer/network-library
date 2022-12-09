@@ -24,7 +24,15 @@ int thisptr::net::TcpSocket::recv(char *buf, int len) {
 }
 
 int thisptr::net::TcpSocket::send(const char *buf) {
-  int iRes = thisptr::net_p::send(m_sock, buf);
+  int iRes = thisptr::net_p::send(m_sock, buf, strlen(buf));
+  if (iRes == thisptr::net_p::NETE_SocketError) {
+    close();
+  }
+  return iRes;
+}
+
+int thisptr::net::TcpSocket::send(const char *buf, int len) {
+  int iRes = thisptr::net_p::send(m_sock, buf, len);
   if (iRes == thisptr::net_p::NETE_SocketError) {
     close();
   }
@@ -87,7 +95,7 @@ void thisptr::net::ConnectionHandlerBase::operator()() {
       std::cout << " : connection closed" << std::endl;
       break;
     } else {
-      std::string data(buffer, 256);
+      std::string data(buffer, res);
       onMessage(data);
     }
   }

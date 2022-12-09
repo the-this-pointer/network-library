@@ -90,7 +90,7 @@ namespace thisptr {
     struct addrinfo* addressinfo(const char* address, const char* port);
     int connect(SOCKET& sock, const char* address, const char* port);
     int setsockopt(SOCKET sock, int opt, const void* val, int size);
-    int send(SOCKET sock, const char* buffer);
+    int send(SOCKET sock, const char* buffer, int len);
     int recv(SOCKET sock, char* buffer, int len);
     int shutdown(SOCKET sock, char c);
     int listen(SOCKET& sock, const char* address, const char* port);
