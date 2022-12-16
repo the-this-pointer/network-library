@@ -7,7 +7,7 @@
 
 using namespace thisptr::net;
 
-TcpServer<BlockingTcpSocket, ConnectionHandlerBase> s;
+BlockingTcpServer<BlockingTcpHandler> s;
 
 void stopServer() {
   // stop server after 10 seconds

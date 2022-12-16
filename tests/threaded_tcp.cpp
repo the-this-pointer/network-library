@@ -9,7 +9,7 @@
 using namespace thisptr::utils;
 using namespace thisptr::net;
 
-class SimpleConnectionHandler: public ConnectionHandlerBase {
+class SimpleConnectionHandler: public BlockingTcpHandler {
 public:
   void onConnect() override {
     std::cout << "new connection received" << std::endl;
@@ -33,8 +33,7 @@ public:
   }
 };
 
-
-TcpServer<BlockingTcpSocket, SimpleConnectionHandler> s;
+BlockingTcpServer<SimpleConnectionHandler> s;
 
 void stopServer() {
   // stop server after 10 seconds

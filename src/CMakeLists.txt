@@ -16,7 +16,7 @@ if(BUILD_SHARED_LIBS)
                 WIN32_LEAN_AND_MEAN
                 _WINSOCK_DEPRECATED_NO_WARNINGS
                 )
-        target_link_libraries(netLib_shared PUBLIC ws2_32)
+        target_link_libraries(netLib_shared PUBLIC ws2_32 wsock32)
     endif()
 endif()
 
@@ -34,5 +34,5 @@ if(WIN32)
             WIN32_LEAN_AND_MEAN
             _WINSOCK_DEPRECATED_NO_WARNINGS
             )
-    target_link_libraries(netLib_static PUBLIC ws2_32)
+    target_link_libraries(netLib_static PUBLIC ws2_32 wsock32)
 endif()

@@ -1,21 +1,23 @@
 #include <Net.h>
 
-thisptr::net::BlockingTcpSocket::~BlockingTcpSocket() {
+using namespace thisptr::net;
+
+BlockingTcpSocket::~BlockingTcpSocket() {
   if (m_sock != -1)
     thisptr::net_p::close(m_sock);
   thisptr::net_p::cleanup();
 }
 
-thisptr::net::BlockingTcpSocket::BlockingTcpSocket(unsigned long long int sock) : m_sock(sock) {
+BlockingTcpSocket::BlockingTcpSocket(unsigned long long int sock) : m_sock(sock) {
   thisptr::net_p::initialize();
 }
 
-bool thisptr::net::BlockingTcpSocket::connect(const std::string& address, const std::string& port) {
+bool BlockingTcpSocket::connect(const std::string& address, const std::string& port) {
   int res = thisptr::net_p::connect(m_sock, address.c_str(), port.c_str());
   return res != thisptr::net_p::NETE_SocketError;
 }
 
-int thisptr::net::BlockingTcpSocket::recv(char *buf, int len) {
+int BlockingTcpSocket::recv(char *buf, int len) {
   int iRes = thisptr::net_p::recv(m_sock, buf, len);
   if ( iRes < 0 ) {
     thisptr::net_p::NetSocketError err = thisptr::net_p::lastError();
@@ -28,7 +30,7 @@ int thisptr::net::BlockingTcpSocket::recv(char *buf, int len) {
   return iRes;
 }
 
-int thisptr::net::BlockingTcpSocket::send(const char *buf) {
+int BlockingTcpSocket::send(const char *buf) {
   int iRes = thisptr::net_p::send(m_sock, buf, strlen(buf));
   if (iRes == thisptr::net_p::NETE_SocketError) {
     close();
@@ -36,7 +38,7 @@ int thisptr::net::BlockingTcpSocket::send(const char *buf) {
   return iRes;
 }
 
-int thisptr::net::BlockingTcpSocket::send(const char *buf, int len) {
+int BlockingTcpSocket::send(const char *buf, int len) {
   int iRes = thisptr::net_p::send(m_sock, buf, len);
   if (iRes == thisptr::net_p::NETE_SocketError) {
     close();
@@ -44,7 +46,7 @@ int thisptr::net::BlockingTcpSocket::send(const char *buf, int len) {
   return iRes;
 }
 
-bool thisptr::net::BlockingTcpSocket::close() {
+bool BlockingTcpSocket::close() {
   if (thisptr::net_p::close(m_sock) == 0) {
     m_sock = -1;
     return true;
@@ -52,14 +54,14 @@ bool thisptr::net::BlockingTcpSocket::close() {
   return false;
 }
 
-bool thisptr::net::BlockingTcpSocket::bind(const std::string &address, const std::string &port) {
+bool BlockingTcpSocket::bind(const std::string &address, const std::string &port) {
   int err = thisptr::net_p::listen(m_sock, address.c_str(), port.c_str());
   bool bRes = (err == thisptr::net_p::NETE_Success && m_sock != INVALID_SOCKET);
 
   return bRes;
 }
 
-std::shared_ptr<thisptr::net::BlockingTcpSocket> thisptr::net::BlockingTcpSocket::accept() {
+std::shared_ptr<BlockingTcpSocket> BlockingTcpSocket::accept() {
   unsigned long long sock = thisptr::net_p::accept(m_sock);
   if (sock == INVALID_SOCKET || thisptr::net_p::lastError() == thisptr::net_p::NETE_Wouldblock)
     return nullptr;
@@ -67,7 +69,7 @@ std::shared_ptr<thisptr::net::BlockingTcpSocket> thisptr::net::BlockingTcpSocket
   return std::make_shared<BlockingTcpSocket>(sock);
 }
 
-void thisptr::net::ConnectionHandlerBase::operator()() {
+void BlockingTcpHandler::operator()() {
   onConnect();
   while(true) {
     char buffer[256] = {0};
@@ -86,20 +88,20 @@ void thisptr::net::ConnectionHandlerBase::operator()() {
   onDisconnect();
 }
 
-void thisptr::net::ConnectionHandlerBase::setTcpServer(thisptr::net::TcpServerBase *server) {
+void BlockingTcpHandler::setTcpServer(TcpServerBase *server) {
   m_server = server;
 }
 
-void thisptr::net::ConnectionHandlerBase::setTcpConn(std::shared_ptr<net::BlockingTcpSocket>& conn) {
+void BlockingTcpHandler::setTcpConn(std::shared_ptr<net::BlockingTcpSocket>& conn) {
   m_conn = conn;
 }
 
-void thisptr::net::ConnectionHandlerBase::onConnect() {
+void BlockingTcpHandler::onConnect() {
 }
 
-void thisptr::net::ConnectionHandlerBase::onDisconnect() {
+void BlockingTcpHandler::onDisconnect() {
 }
 
-void thisptr::net::ConnectionHandlerBase::onMessage(std::string data) {
+void BlockingTcpHandler::onMessage(std::string data) {
   std::cerr << "if you can read this, it means you should think about handling connections!" << std::endl;
 }

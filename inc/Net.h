@@ -12,12 +12,18 @@
 #include <net_p.h>
 #include <Pool.h>
 
+#ifdef WITH_ASIO
+#include <asio.hpp>
+#include <asio/ts/buffer.hpp>
+#include <asio/ts/internet.hpp>
+#endif
+
 namespace thisptr {
   namespace net {
 
-    template <typename T>
+    template <typename S>
     class Socket {
-      using socket_type = T;
+      using socket_type = S;
     public:
       Socket() = default;
       ~Socket() = default;
@@ -30,7 +36,7 @@ namespace thisptr {
         return m_sock.bind(address, port);
       }
 
-      std::shared_ptr<T> accept() {
+      std::shared_ptr<socket_type> accept() {
         return m_sock.accept();
       }
 
@@ -54,6 +60,170 @@ namespace thisptr {
       socket_type m_sock;
     };
 
+    template <typename H>
+    class AsioTcpSocket;
+
+    template <typename H>
+    class Socket<AsioTcpSocket<H>> {
+      using socket_type = AsioTcpSocket<H>;
+      using handler_ptr = std::shared_ptr<H>;
+    public:
+      Socket(handler_ptr handler): m_sock(handler) {}
+      ~Socket() = default;
+
+      bool connect(const std::string& address, const std::string& port) {
+        return m_sock.connect(address, port);
+      }
+
+      bool bind(const std::string& address, const std::string& port) {
+        return m_sock.bind(address, port);
+      }
+
+      std::shared_ptr<AsioTcpSocket<H>> accept() {
+        return m_sock.accept();
+      }
+
+      int recv(char* buf, int len) {
+        return m_sock.recv(buf, len);
+      }
+
+      int send(const char* buf) {
+        return m_sock.send(buf);
+      }
+
+      int send(const char* buf, int len) {
+        return m_sock.send(buf, len);
+      }
+
+      bool close() {
+        return m_sock.close();
+      }
+
+    private:
+      socket_type m_sock;
+    };
+
+    template <typename H>
+    class AsioTcpSocket {
+      using handler_type = H;
+      using handler_ptr = std::shared_ptr<H>;
+    public:
+      explicit AsioTcpSocket(handler_ptr handler):
+      m_handler(handler), m_socket(m_context), m_acceptor(make_strand(m_context))
+      {}
+
+      ~AsioTcpSocket() {
+        close();
+      }
+
+      bool connect(const std::string& address, const std::string& port) {
+        try {
+          asio::ip::tcp::resolver resolver(m_context);
+          asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(address, port);
+
+          asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint endpoint){
+            if (ec)
+              std::cerr << "unable to connect to endpoint: " << endpoint.address().to_string() << ", ec: " << ec << std::endl;
+            else
+              m_handler->onConnected(endpoint.address().to_string());
+          });
+
+          m_thread = std::thread([this](){ m_context.run(); });
+        } catch (std::exception& e) {
+          std::cerr << "exception occured on asio socket connect" << e.what() << std::endl;
+          return false;
+        }
+        return true;
+      }
+
+      bool bind(const std::string& address, const std::string& port) {
+        try {
+          asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), std::stoi(port));
+          m_acceptor.open(endpoint.protocol());
+          m_acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+          m_acceptor.bind(endpoint);
+          m_acceptor.listen();
+
+          m_thread = std::thread([this](){ m_context.run(); });
+        } catch (std::exception& e) {
+          std::cerr << "exception occured on asio bind" << e.what() << std::endl;
+          return false;
+        }
+        return true;
+      }
+
+      std::shared_ptr<AsioTcpSocket> accept() {
+
+        std::shared_ptr<asio::ip::tcp::socket> sock{new asio::ip::tcp::socket(m_context)};
+        m_acceptor.async_accept(*sock,
+                                [this, sock](std::error_code ec)
+                                {
+                                  if (ec)
+                                  {
+                                    std::cerr << "unable to accept connection, ec: " << ec << std::endl;
+                                    m_acceptor.cancel();
+                                  } else {
+                                    m_handler->onNewConnection(sock);
+                                    accept();
+                                  }
+                                });
+
+        return nullptr;
+      }
+
+      int recv(char* buf, int len) {
+        asio::async_read(m_socket, asio::buffer(buf, len),
+                         [this, buf](std::error_code ec, std::size_t length){
+                           if (ec) {
+                             std::cerr << "unable to read from socket, ec: " << ec << std::endl;
+                             m_socket.close();
+                           } else
+                             m_handler->onDataReceived(buf, length);
+                         });
+        return 0;
+      }
+
+      int send(const char* buf) {
+        return send(buf, strlen(buf));
+      }
+
+      int send(const char* buf, int len) {
+        asio::async_write(m_socket, asio::buffer(buf, len),
+                          [this, buf](std::error_code ec, std::size_t length){
+                            if (ec) {
+                              std::cerr << "unable to write to socket" << std::endl;
+                              m_socket.close();
+                            } else
+                              m_handler->onDataSent(buf, length);
+                          });
+        return 0;
+      }
+
+      bool close() {
+        if (m_acceptor.is_open())
+          asio::post(m_acceptor.get_executor(), [this] { m_acceptor.cancel(); });
+
+        if (m_socket.is_open())
+          asio::post(m_context, [this]() { m_socket.close(); });
+
+        m_context.stop();
+        if (m_thread.joinable())
+          m_thread.join();
+
+        m_handler->onDisconnected();
+        return true;
+      }
+
+    private:
+      asio::io_context m_context;
+      std::thread m_thread;
+
+      asio::ip::tcp::socket m_socket;
+      asio::ip::tcp::acceptor m_acceptor;
+
+      handler_ptr m_handler;
+    };
+
     class BlockingTcpSocket {
     public:
       BlockingTcpSocket() : BlockingTcpSocket(-1) {}
@@ -73,21 +243,26 @@ namespace thisptr {
       unsigned long long m_sock;
     };
 
-    template <typename T>
-    class TcpClient: public Socket<T> {
-      using socket_type = T;
+    template <typename S>
+    class TcpClient: public Socket<S> {
+      using socket_type = S;
     public:
       TcpClient(): Socket<socket_type>() {}
       virtual ~TcpClient() = default;
-
-    private:
-      std::string m_address;
-      std::string m_port;
     };
 
     class TcpServerBase {};
 
-    class ConnectionHandlerBase {
+    class AsyncConnectionHandlerBase {
+    public:
+      virtual void onConnected(const std::string& endpoint) = 0;
+      virtual void onDisconnected() = 0;
+      virtual void onDataReceived(const char* buff, std::size_t len) = 0;
+      virtual void onDataSent(const char* buff, std::size_t len) = 0;
+      virtual void onNewConnection(std::shared_ptr<asio::ip::tcp::socket> sock) = 0;
+    };
+
+    class BlockingTcpHandler {
     public:
       void operator() ();
 
@@ -122,7 +297,7 @@ namespace thisptr {
         return bRes;
       }
 
-      std::shared_ptr<BlockingTcpSocket> accept() {
+      std::shared_ptr<socket_type> accept() {
         return m_sock.accept();
       }
 
@@ -204,6 +379,52 @@ namespace thisptr {
       void(*m_removeHandlerCallback)(std::shared_ptr<handler_type>);
 
     };
+
+    template <typename H>
+    class TcpServer<AsioTcpSocket<H>, H>: public TcpServerBase {
+      using socket_type = AsioTcpSocket<H>;
+      using handler_ptr = std::shared_ptr<H>;
+    public:
+      TcpServer(handler_ptr handler): m_sock(handler) {}
+
+      virtual ~TcpServer() {
+        stop();
+      }
+
+      bool bind(const std::string& address, const std::string& port) {
+        return m_sock.bind(address, port);
+      }
+
+      std::shared_ptr<socket_type> accept() {
+        return m_sock.accept();
+      }
+
+      void start(const std::string& address, const std::string& port) {
+        if (!bind(address, port))
+        {
+          std::cout << "s : unable to bind to host" << std::endl;
+          return;
+        }
+
+        accept();
+      }
+
+      void stop() {
+        m_sock.close();
+      }
+
+    protected:
+      Socket<socket_type> m_sock;
+
+      std::string m_address;
+      std::string m_port;
+    };
+
+    template <typename H>
+    using BlockingTcpServer = TcpServer<BlockingTcpSocket, H>;
+
+    template <typename H>
+    using AsyncTcpServer = TcpServer<AsioTcpSocket<H>, H>;
   }
 }
 
