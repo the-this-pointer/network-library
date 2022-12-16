@@ -1,16 +1,21 @@
 #include <Net.h>
 
-thisptr::net::TcpSocket::~TcpSocket() {
+thisptr::net::BlockingTcpSocket::~BlockingTcpSocket() {
   if (m_sock != -1)
     thisptr::net_p::close(m_sock);
   thisptr::net_p::cleanup();
 }
 
-thisptr::net::TcpSocket::TcpSocket(unsigned long long int sock) : m_sock(sock) {
+thisptr::net::BlockingTcpSocket::BlockingTcpSocket(unsigned long long int sock) : m_sock(sock) {
   thisptr::net_p::initialize();
 }
 
-int thisptr::net::TcpSocket::recv(char *buf, int len) {
+bool thisptr::net::BlockingTcpSocket::connect(const std::string& address, const std::string& port) {
+  int res = thisptr::net_p::connect(m_sock, address.c_str(), port.c_str());
+  return res != thisptr::net_p::NETE_SocketError;
+}
+
+int thisptr::net::BlockingTcpSocket::recv(char *buf, int len) {
   int iRes = thisptr::net_p::recv(m_sock, buf, len);
   if ( iRes < 0 ) {
     thisptr::net_p::NetSocketError err = thisptr::net_p::lastError();
@@ -23,7 +28,7 @@ int thisptr::net::TcpSocket::recv(char *buf, int len) {
   return iRes;
 }
 
-int thisptr::net::TcpSocket::send(const char *buf) {
+int thisptr::net::BlockingTcpSocket::send(const char *buf) {
   int iRes = thisptr::net_p::send(m_sock, buf, strlen(buf));
   if (iRes == thisptr::net_p::NETE_SocketError) {
     close();
@@ -31,7 +36,7 @@ int thisptr::net::TcpSocket::send(const char *buf) {
   return iRes;
 }
 
-int thisptr::net::TcpSocket::send(const char *buf, int len) {
+int thisptr::net::BlockingTcpSocket::send(const char *buf, int len) {
   int iRes = thisptr::net_p::send(m_sock, buf, len);
   if (iRes == thisptr::net_p::NETE_SocketError) {
     close();
@@ -39,7 +44,7 @@ int thisptr::net::TcpSocket::send(const char *buf, int len) {
   return iRes;
 }
 
-bool thisptr::net::TcpSocket::close() {
+bool thisptr::net::BlockingTcpSocket::close() {
   if (thisptr::net_p::close(m_sock) == 0) {
     m_sock = -1;
     return true;
@@ -47,40 +52,19 @@ bool thisptr::net::TcpSocket::close() {
   return false;
 }
 
-bool thisptr::net::TcpSocket::setTimeout(int opt, int val) {
-  struct timeval timeout{};
-  timeout.tv_sec = val;
-  timeout.tv_usec = 0;
+bool thisptr::net::BlockingTcpSocket::bind(const std::string &address, const std::string &port) {
+  int err = thisptr::net_p::listen(m_sock, address.c_str(), port.c_str());
+  bool bRes = (err == thisptr::net_p::NETE_Success && m_sock != INVALID_SOCKET);
 
-  return setOpt(opt, &timeout, sizeof(timeout));
+  return bRes;
 }
 
-bool thisptr::net::TcpSocket::setTimeout(unsigned long long int sock, int opt, int val) {
-  struct timeval timeout;
-  timeout.tv_sec = val;
-  timeout.tv_usec = 0;
+std::shared_ptr<thisptr::net::BlockingTcpSocket> thisptr::net::BlockingTcpSocket::accept() {
+  unsigned long long sock = thisptr::net_p::accept(m_sock);
+  if (sock == INVALID_SOCKET || thisptr::net_p::lastError() == thisptr::net_p::NETE_Wouldblock)
+    return nullptr;
 
-  return setOpt(sock, opt, &timeout, sizeof(timeout));
-}
-
-bool thisptr::net::TcpSocket::setOpt(unsigned long long int sock, int opt, const void *val, int size) {
-  return thisptr::net_p::setsockopt(sock, opt, val, size) == 0;
-}
-
-bool thisptr::net::TcpSocket::setOpt(int opt, const void *val, int size) {
-  return thisptr::net_p::setsockopt(m_sock, opt, val, size) == 0;
-}
-
-bool thisptr::net::TcpClient::connect(const std::string &address, const std::string &port) {
-  m_address = address;
-  m_port = port;
-  int res = thisptr::net_p::connect(m_sock, m_address.c_str(), m_port.c_str());
-  if (res != thisptr::net_p::NETE_SocketError) {
-    setTimeout(SO_RCVTIMEO, 5000);
-    setTimeout(SO_SNDTIMEO, 5000);
-    return true;
-  }
-  return false;
+  return std::make_shared<BlockingTcpSocket>(sock);
 }
 
 void thisptr::net::ConnectionHandlerBase::operator()() {
@@ -106,7 +90,7 @@ void thisptr::net::ConnectionHandlerBase::setTcpServer(thisptr::net::TcpServerBa
   m_server = server;
 }
 
-void thisptr::net::ConnectionHandlerBase::setTcpConn(std::shared_ptr<net::TcpSocket>& conn) {
+void thisptr::net::ConnectionHandlerBase::setTcpConn(std::shared_ptr<net::BlockingTcpSocket>& conn) {
   m_conn = conn;
 }
 

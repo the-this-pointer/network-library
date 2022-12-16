@@ -34,7 +34,7 @@ public:
 };
 
 
-TcpServer<SimpleConnectionHandler> s;
+TcpServer<BlockingTcpSocket, SimpleConnectionHandler> s;
 
 void stopServer() {
   // stop server after 10 seconds
@@ -44,7 +44,7 @@ void stopServer() {
 }
 
 void client(int idx) {
-  TcpClient c;
+  TcpClient<BlockingTcpSocket> c;
   if (!c.connect("127.0.0.1", "7232"))
   {
     std::cout << idx << " : unable to connect to host" << std::endl;

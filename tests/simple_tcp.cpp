@@ -7,7 +7,7 @@
 
 using namespace thisptr::net;
 
-TcpServer<ConnectionHandlerBase> s;
+TcpServer<BlockingTcpSocket, ConnectionHandlerBase> s;
 
 void stopServer() {
   // stop server after 10 seconds
@@ -59,7 +59,7 @@ void server() {
 }
 
 void client(int idx) {
-  TcpClient c;
+  TcpClient<BlockingTcpSocket> c;
   if (!c.connect("127.0.0.1", "7232"))
   {
     std::cout << idx << " : unable to connect to host" << std::endl;

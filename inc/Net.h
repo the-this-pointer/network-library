@@ -15,51 +15,77 @@
 namespace thisptr {
   namespace net {
 
+    template <typename T>
     class Socket {
+      using socket_type = T;
     public:
       Socket() = default;
-      virtual ~Socket() = default;
+      ~Socket() = default;
 
-      virtual int recv(char* buf, int len) = 0;
-      virtual int send(const char* buf) = 0;
-      virtual int send(const char* buf, int len) = 0;
-      virtual bool close() = 0;
+      bool connect(const std::string& address, const std::string& port) {
+        return m_sock.connect(address, port);
+      }
+
+      bool bind(const std::string& address, const std::string& port) {
+        return m_sock.bind(address, port);
+      }
+
+      std::shared_ptr<T> accept() {
+        return m_sock.accept();
+      }
+
+      int recv(char* buf, int len) {
+        return m_sock.recv(buf, len);
+      }
+
+      int send(const char* buf) {
+        return m_sock.send(buf);
+      }
+
+      int send(const char* buf, int len) {
+        return m_sock.send(buf, len);
+      }
+
+      bool close() {
+        return m_sock.close();
+      }
+
+    private:
+      socket_type m_sock;
     };
 
-    class TcpSocket : public Socket {
+    class BlockingTcpSocket {
     public:
-      TcpSocket() : TcpSocket(-1) {}
-      explicit TcpSocket(unsigned long long sock);
-      virtual ~TcpSocket();
+      BlockingTcpSocket() : BlockingTcpSocket(-1) {}
+      explicit BlockingTcpSocket(unsigned long long sock);
+      virtual ~BlockingTcpSocket();
 
-      int recv(char* buf, int len) override;
-      int send(const char* buf) override;
-      int send(const char* buf, int len) override;
-      bool close() override;
-      bool setTimeout(int opt, int val);
+      bool connect(const std::string& address, const std::string& port);
+      bool bind(const std::string& address, const std::string& port);
+      std::shared_ptr<BlockingTcpSocket> accept();
+
+      int recv(char* buf, int len);
+      int send(const char* buf);
+      int send(const char* buf, int len);
+      bool close();
 
     protected:
-      bool setTimeout(unsigned long long sock, int opt, int val);
-      bool setOpt(unsigned long long sock, int opt, const void* val, int size);
-      bool setOpt(int opt, const void* val, int size);
       unsigned long long m_sock;
     };
 
-    class TcpClient: public TcpSocket {
+    template <typename T>
+    class TcpClient: public Socket<T> {
+      using socket_type = T;
     public:
-      TcpClient(): TcpSocket() {}
-      virtual ~TcpClient() {}
-
-      bool connect(const std::string& address, const std::string& port);
+      TcpClient(): Socket<socket_type>() {}
+      virtual ~TcpClient() = default;
 
     private:
       std::string m_address;
       std::string m_port;
     };
 
-    class TcpServerBase {
-
-    };
+    class TcpServerBase {};
 
     class ConnectionHandlerBase {
     public:
@@ -70,16 +96,18 @@ namespace thisptr {
       virtual void onMessage(std::string data);
 
       void setTcpServer(TcpServerBase* server);
-      void setTcpConn(std::shared_ptr<net::TcpSocket>& conn);
+      void setTcpConn(std::shared_ptr<net::BlockingTcpSocket>& conn);
     protected:
       TcpServerBase* m_server {};
-      std::shared_ptr<net::TcpSocket> m_conn{};
+      std::shared_ptr<net::BlockingTcpSocket> m_conn{};
     };
 
-    template <typename T>
-    class TcpServer: public TcpServerBase, public TcpSocket {
+    template <typename S, typename H>
+    class TcpServer: public TcpServerBase {
+      using socket_type = S;
+      using handler_type = H;
     public:
-      TcpServer(): TcpSocket() {}
+      TcpServer() = default;
 
       virtual ~TcpServer() {
         if (m_stopThread.joinable())
@@ -89,24 +117,13 @@ namespace thisptr {
       }
 
       bool bind(const std::string& address, const std::string& port) {
-        m_address = address;
-        m_port = port;
-        int err = thisptr::net_p::listen(m_sock, m_address.c_str(), m_port.c_str());
-        bool bRes = (err == thisptr::net_p::NETE_Success && m_sock != INVALID_SOCKET);
-
+        bool bRes = m_sock.bind(address, port);
         if (bRes) m_stopThread = std::thread(&TcpServer::stopRunnable, this);
-
         return bRes;
       }
 
-      std::shared_ptr<TcpSocket> accept() {
-        unsigned long long sock = thisptr::net_p::accept(m_sock);
-        if (sock == INVALID_SOCKET || thisptr::net_p::lastError() == thisptr::net_p::NETE_Wouldblock)
-          return nullptr;
-
-        setTimeout(sock, SO_RCVTIMEO, 5000);
-        setTimeout(sock, SO_SNDTIMEO, 5000);
-        return std::make_shared<TcpSocket>(sock);
+      std::shared_ptr<BlockingTcpSocket> accept() {
+        return m_sock.accept();
       }
 
       void start(const std::string& address, const std::string& port) {
@@ -124,7 +141,7 @@ namespace thisptr {
               break;
             }
 
-            std::shared_ptr<T> h = newHandler();
+            std::shared_ptr<handler_type> h = newHandler();
             if (!h)
             {
               conn->close();
@@ -144,12 +161,12 @@ namespace thisptr {
         m_stopCv.notify_all();
       }
 
-      void setNewHandler(std::shared_ptr<T>(*newHandler)())
+      void setNewHandler(std::shared_ptr<handler_type>(*newHandler)())
       {
         m_newHandlerCallback = newHandler;
       }
 
-      std::shared_ptr<T> newHandler()
+      std::shared_ptr<handler_type> newHandler()
       {
         if (!m_newHandlerCallback)
         {
@@ -159,7 +176,7 @@ namespace thisptr {
         return m_newHandlerCallback();
       }
 
-      void removeHandler(std::shared_ptr<T> handler)
+      void removeHandler(std::shared_ptr<handler_type> handler)
       {
         if (m_removeHandlerCallback)
           m_removeHandlerCallback(handler);
@@ -169,8 +186,10 @@ namespace thisptr {
       void stopRunnable() {
         std::unique_lock<std::mutex> lk(m_stopMutex);
         m_stopCv.wait(lk, [=]{ return m_stopRequested; });
-        thisptr::net_p::close(m_sock);
+        m_sock.close();
       }
+
+      Socket<socket_type> m_sock;
 
       bool m_stopRequested = false;
       std::thread m_serverThread;
@@ -181,8 +200,8 @@ namespace thisptr {
       std::string m_address;
       std::string m_port;
 
-      std::shared_ptr<T>(*m_newHandlerCallback)();
-      void(*m_removeHandlerCallback)(std::shared_ptr<T>);
+      std::shared_ptr<handler_type>(*m_newHandlerCallback)();
+      void(*m_removeHandlerCallback)(std::shared_ptr<handler_type>);
 
     };
   }
