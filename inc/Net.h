@@ -130,7 +130,7 @@ namespace thisptr {
             if (ec)
               std::cerr << "unable to connect to endpoint: " << endpoint.address().to_string() << ", ec: " << ec << std::endl;
             else
-              m_handler->onConnected(endpoint.address().to_string());
+              m_handler->onConnected(m_socket, endpoint.address().to_string());
           });
 
           m_thread = std::thread([this](){ m_context.run(); });
@@ -168,8 +168,7 @@ namespace thisptr {
                                     std::cerr << "unable to accept connection, ec: " << ec << std::endl;
                                     m_acceptor.cancel();
                                   } else {
-                                    auto socket = std::make_shared<AsioTcpSocket<handler_type>>(m_handler, *sock);
-                                    m_handler->onNewConnection(socket);
+                                    m_handler->onNewConnection(*sock);
                                     accept();
                                   }
                                 });
@@ -180,7 +179,7 @@ namespace thisptr {
       int recv(char* buf, int len) {
         asio::async_read(m_socket, asio::buffer(buf, len),
                          [this, buf](std::error_code ec, std::size_t length){
-                           m_handler->onDataReceived(ec, buf, length);
+                           m_handler->onDataReceived(m_socket, ec, buf, length);
                          });
         return 0;
       }
@@ -192,7 +191,7 @@ namespace thisptr {
       int send(const char* buf, int len) {
         asio::async_write(m_socket, asio::buffer(buf, len),
                           [this, buf](std::error_code ec, std::size_t length){
-                            m_handler->onDataSent(ec, buf, length);
+                            m_handler->onDataSent(m_socket, ec, buf, length);
                           });
         return -1;
       }
@@ -212,7 +211,7 @@ namespace thisptr {
           m_thread.join();
 
         if (bWasOpen)
-          m_handler->onDisconnected();
+          m_handler->onDisconnected(m_socket);
 
         return true;
       }
@@ -260,11 +259,11 @@ namespace thisptr {
     class AsyncConnectionHandlerBase {
       using socket_type = S;
     public:
-      virtual void onConnected(const std::string& endpoint) {}
-      virtual void onDisconnected() {}
-      virtual void onDataReceived(std::error_code ec, const char* buff, std::size_t len) = 0;
-      virtual void onDataSent(std::error_code ec, const char* buff, std::size_t len) = 0;
-      virtual void onNewConnection(std::shared_ptr<socket_type> sock) {}
+      virtual void onConnected(asio::ip::tcp::socket& sock, const std::string& endpoint) {}
+      virtual void onDisconnected(asio::ip::tcp::socket& sock) {}
+      virtual void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const char* buff, std::size_t len) = 0;
+      virtual void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const char* buff, std::size_t len) = 0;
+      virtual void onNewConnection(asio::ip::tcp::socket& sock) {}
     };
 
     class BlockingTcpHandler {
