@@ -106,7 +106,6 @@ namespace thisptr {
 
     template <typename H>
     class AsioTcpSocket {
-      using handler_type = H;
       using handler_ptr = std::shared_ptr<H>;
     public:
       explicit AsioTcpSocket(handler_ptr handler, asio::ip::tcp::socket& socket):
@@ -176,24 +175,32 @@ namespace thisptr {
         return nullptr;
       }
 
-      int recv(char* buf, int len) {
-        asio::async_read(m_socket, asio::buffer(buf, len),
-                         [this, buf](std::error_code ec, std::size_t length){
-                           m_handler->onDataReceived(m_socket, ec, buf, length);
+      int recv() {
+        asio::async_read(m_socket, m_buffer,
+                         asio::transfer_at_least(1),
+                         [this](std::error_code ec, std::size_t length){
+                           std::string payload;
+                           {
+                             std::stringstream ss;
+                             ss << &m_buffer;
+                             ss.flush();
+                             payload = ss.str();
+                           }
+                           m_handler->onDataReceived(m_socket, ec, payload);
                          });
         return 0;
       }
 
-      int send(const char* buf) {
-        return send(buf, strlen(buf));
+      int send(const std::string& payload) {
+        asio::async_write(m_socket, asio::buffer(payload),
+                          [this, payload](std::error_code ec, std::size_t length){
+                            m_handler->onDataSent(m_socket, ec, payload);
+                          });
+        return -1;
       }
 
       int send(const char* buf, int len) {
-        asio::async_write(m_socket, asio::buffer(buf, len),
-                          [this, buf](std::error_code ec, std::size_t length){
-                            m_handler->onDataSent(m_socket, ec, buf, length);
-                          });
-        return -1;
+        return send(std::string(buf, len));
       }
 
       bool close() {
@@ -217,6 +224,7 @@ namespace thisptr {
       }
 
     private:
+      asio::streambuf m_buffer;
       asio::io_context m_context;
       std::thread m_thread;
 
@@ -261,8 +269,8 @@ namespace thisptr {
     public:
       virtual void onConnected(asio::ip::tcp::socket& sock, const std::string& endpoint) {}
       virtual void onDisconnected(asio::ip::tcp::socket& sock) {}
-      virtual void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const char* buff, std::size_t len) = 0;
-      virtual void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const char* buff, std::size_t len) = 0;
+      virtual void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) = 0;
+      virtual void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) = 0;
       virtual void onNewConnection(asio::ip::tcp::socket& sock) {}
     };
 

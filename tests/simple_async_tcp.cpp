@@ -22,19 +22,18 @@ public:
     m_connections.erase(&sock);
   }
 
-  void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const char *buff, std::size_t len) override {
+  void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
     if (ec) {
       std::cerr << "[server] unable to read from socket, ec: " << ec << std::endl;
     } else
-      std::cout << "[server] data received: " << std::string(buff, len).c_str() << std::endl;
-    delete[] buff;
+      std::cout << "[server] data received: " << payload.c_str() << std::endl;
   }
 
-  void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const char *buff, std::size_t len) override {
+  void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
     if (ec) {
       std::cerr << "[server] unable to write to socket" << std::endl;
     } else
-      std::cout << "[server] data sent, len: " << len << std::endl;
+      std::cout << "[server] data sent, len: " << payload.length() << std::endl;
   }
 
   void onNewConnection(asio::ip::tcp::socket& sock) override {
@@ -43,9 +42,7 @@ public:
     m_connections[&sock] = socket;
 
     socket->send("hi from server.");
-
-    char* buff = new char[11] {0};
-    socket->recv(buff, 10);
+    socket->recv();
   }
 
 private:
@@ -62,24 +59,23 @@ public:
     std::cout << "[client] disconnected" << std::endl;
   }
 
-  void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const char *buff, std::size_t len) override {
+  void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
     if (ec) {
       std::cerr << "[client] unable to read from socket, ec: " << ec << std::endl;
     } else
-      std::cout << "[client] data received: " << std::string(buff, len).c_str() << std::endl;
+      std::cout << "[client] data received: " << payload.c_str() << std::endl;
   }
 
-  void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const char *buff, std::size_t len) override {
+  void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
     if (ec) {
       std::cerr << "[client] unable to write to socket" << std::endl;
     } else
-      std::cout << "[client] data sent, len: " << len << std::endl;
+      std::cout << "[client] data sent, len: " << payload.length() << std::endl;
   }
 
 };
 
 auto handler = std::make_shared<ServerHandler>();
-auto chandler = std::make_shared<ClientHandler>();
 AsyncTcpServer<ServerHandler> s(handler);
 
 void stopServer() {
@@ -90,6 +86,7 @@ void stopServer() {
 
 void client(int idx) {
   std::this_thread::sleep_for(1000ms);
+  auto chandler = std::make_shared<ClientHandler>();
   AsioTcpSocket<ClientHandler> c(chandler);
   if (!c.connect("127.0.0.1", "7232"))
   {
@@ -100,14 +97,10 @@ void client(int idx) {
   std::stringstream ss;
   ss << idx << ":" << "hello!\r\n";
 
-  c.send(ss.str().c_str());
+  c.send(ss.str());
 
-  char buffer[16] = {0};
-  c.recv(buffer, 15);
-  std::this_thread::sleep_for(2000ms);
-
-  std::string recData(buffer, 16);
-  std::cout << "cli[" << idx << "] data:" << recData << std::endl;
+  c.recv();
+  std::this_thread::sleep_for(3000ms);
 }
 
 int main() {
