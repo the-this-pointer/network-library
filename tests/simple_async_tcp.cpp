@@ -22,11 +22,13 @@ public:
     m_connections.erase(&sock);
   }
 
-  void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
+  bool onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
     if (ec) {
       std::cerr << "[server] unable to read from socket, ec: " << ec << std::endl;
+      return false;
     } else
       std::cout << "[server] data received: " << payload.c_str() << std::endl;
+    return true;
   }
 
   void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
@@ -59,11 +61,13 @@ public:
     std::cout << "[client] disconnected" << std::endl;
   }
 
-  void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
+  bool onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {
     if (ec) {
       std::cerr << "[client] unable to read from socket, ec: " << ec << std::endl;
+      return false;
     } else
       std::cout << "[client] data received: " << payload.c_str() << std::endl;
+    return true;
   }
 
   void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) override {

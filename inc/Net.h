@@ -108,16 +108,20 @@ namespace thisptr {
     class AsioTcpSocket {
       using handler_ptr = std::shared_ptr<H>;
     public:
-      explicit AsioTcpSocket(handler_ptr handler, asio::ip::tcp::socket& socket):
+      explicit AsioTcpSocket(asio::ip::tcp::socket& socket, handler_ptr handler = nullptr):
       m_handler(handler), m_socket(std::move(socket)), m_acceptor(make_strand(m_context))
       {}
 
-      explicit AsioTcpSocket(handler_ptr handler):
+      explicit AsioTcpSocket(handler_ptr handler = nullptr):
       m_handler(handler), m_socket(m_context), m_acceptor(make_strand(m_context))
       {}
 
       ~AsioTcpSocket() {
         close();
+      }
+
+      void setHandler(handler_ptr handler) {
+        m_handler = handler;
       }
 
       bool connect(const std::string& address, const std::string& port) {
@@ -186,7 +190,8 @@ namespace thisptr {
                              ss.flush();
                              payload = ss.str();
                            }
-                           m_handler->onDataReceived(m_socket, ec, payload);
+                           if (m_handler->onDataReceived(m_socket, ec, payload))
+                             recv();
                          });
         return 0;
       }
@@ -217,7 +222,7 @@ namespace thisptr {
         if (m_thread.joinable())
           m_thread.join();
 
-        if (bWasOpen)
+        if (bWasOpen && m_handler)
           m_handler->onDisconnected(m_socket);
 
         return true;
@@ -269,7 +274,7 @@ namespace thisptr {
     public:
       virtual void onConnected(asio::ip::tcp::socket& sock, const std::string& endpoint) {}
       virtual void onDisconnected(asio::ip::tcp::socket& sock) {}
-      virtual void onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) = 0;
+      virtual bool onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) = 0;
       virtual void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) = 0;
       virtual void onNewConnection(asio::ip::tcp::socket& sock) {}
     };
