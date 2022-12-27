@@ -196,6 +196,22 @@ namespace thisptr {
         return 0;
       }
 
+      int recv(unsigned int len) {
+        asio::async_read(m_socket, m_buffer,
+                         asio::transfer_exactly(len),
+                         [this](std::error_code ec, std::size_t length){
+                           std::string payload;
+                           {
+                             std::stringstream ss;
+                             ss << &m_buffer;
+                             ss.flush();
+                             payload = ss.str();
+                           }
+                           m_handler->onDataReceived(m_socket, ec, payload);
+                         });
+        return 0;
+      }
+
       int send(const std::string& payload) {
         asio::async_write(m_socket, asio::buffer(payload),
                           [this, payload](std::error_code ec, std::size_t length){
