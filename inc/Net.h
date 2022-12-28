@@ -64,32 +64,69 @@ namespace thisptr {
     template <typename H>
     class AsioTcpSocket;
 
+    class AsioContextHolder {
+    public:
+      virtual ~AsioContextHolder() {
+        stop();
+      }
+
+      bool start() {
+        if (m_running)
+          return true;
+        m_running = true;
+
+        try {
+          m_thread = std::thread([this](){ m_context.run(); });
+          return true;
+        } catch (std::exception& e) {
+          std::cerr << "exception occured on asio context start" << e.what() << std::endl;
+        }
+        return false;
+      }
+
+      void stop() {
+        if (!m_running)
+          return;
+        m_running = false;
+        m_context.stop();
+        if (m_thread.joinable())
+          m_thread.join();
+      }
+
+      asio::io_context& ctx() {
+        return m_context;
+      }
+
+    private:
+      bool m_running {false};
+      asio::io_context m_context;
+      std::thread m_thread;
+    };
+
     template <typename H>
     class Socket<AsioTcpSocket<H>> {
       using socket_type = AsioTcpSocket<H>;
       using handler_ptr = std::shared_ptr<H>;
     public:
-      Socket(handler_ptr handler): m_sock(handler) {}
-      ~Socket() = default;
+      explicit Socket(handler_ptr handler): m_sock(m_contextHolder.ctx(), handler) {}
+      ~Socket() { m_contextHolder.stop(); }
 
       bool connect(const std::string& address, const std::string& port) {
-        return m_sock.connect(address, port);
+        bool res = m_sock.connect(address, port);
+        m_contextHolder.start();
+        return res;
       }
 
-      bool bind(const std::string& address, const std::string& port) {
-        return m_sock.bind(address, port);
+      int recv() {
+        return m_sock.recv();
       }
 
-      std::shared_ptr<socket_type> accept() {
-        return m_sock.accept();
+      int recv(unsigned int len) {
+        return m_sock.recv(len);
       }
 
-      int recv(char* buf, int len) {
-        return m_sock.recv(buf, len);
-      }
-
-      int send(const char* buf) {
-        return m_sock.send(buf);
+      int send(const std::string& payload) {
+        return m_sock.send(payload);
       }
 
       int send(const char* buf, int len) {
@@ -101,6 +138,7 @@ namespace thisptr {
       }
 
     private:
+      AsioContextHolder m_contextHolder;
       socket_type m_sock;
     };
 
@@ -109,11 +147,11 @@ namespace thisptr {
       using handler_ptr = std::shared_ptr<H>;
     public:
       explicit AsioTcpSocket(asio::ip::tcp::socket& socket, handler_ptr handler = nullptr):
-      m_handler(handler), m_socket(std::move(socket)), m_acceptor(make_strand(m_context))
+      m_handler(handler), m_socket(std::move(socket))
       {}
 
-      explicit AsioTcpSocket(handler_ptr handler = nullptr):
-      m_handler(handler), m_socket(m_context), m_acceptor(make_strand(m_context))
+      explicit AsioTcpSocket(asio::io_context& context, handler_ptr handler = nullptr):
+      m_handler(handler), m_socket(context)
       {}
 
       ~AsioTcpSocket() {
@@ -126,7 +164,7 @@ namespace thisptr {
 
       bool connect(const std::string& address, const std::string& port) {
         try {
-          asio::ip::tcp::resolver resolver(m_context);
+          asio::ip::tcp::resolver resolver(m_socket.get_executor());
           asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(address, port);
 
           asio::async_connect(m_socket, endpoints, [this](std::error_code ec, asio::ip::tcp::endpoint endpoint){
@@ -136,47 +174,11 @@ namespace thisptr {
               m_handler->onConnected(m_socket, endpoint.address().to_string());
           });
 
-          m_thread = std::thread([this](){ m_context.run(); });
         } catch (std::exception& e) {
           std::cerr << "exception occured on asio socket connect" << e.what() << std::endl;
           return false;
         }
         return true;
-      }
-
-      bool bind(const std::string& address, const std::string& port) {
-        try {
-          asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), std::stoi(port));
-          m_acceptor.open(endpoint.protocol());
-          m_acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
-          m_acceptor.bind(endpoint);
-          m_acceptor.listen();
-
-          m_thread = std::thread([this](){ m_context.run(); });
-        } catch (std::exception& e) {
-          std::cerr << "exception occured on asio bind" << e.what() << std::endl;
-          return false;
-        }
-        return true;
-      }
-
-      std::shared_ptr<AsioTcpSocket<H>> accept() {
-
-        auto* sock = new asio::ip::tcp::socket(m_context);
-        m_acceptor.async_accept(*sock,
-                                [this, sock](std::error_code ec)
-                                {
-                                  if (ec)
-                                  {
-                                    std::cerr << "unable to accept connection, ec: " << ec << std::endl;
-                                    m_acceptor.cancel();
-                                  } else {
-                                    m_handler->onNewConnection(*sock);
-                                    accept();
-                                  }
-                                });
-
-        return nullptr;
       }
 
       int recv() {
@@ -225,18 +227,11 @@ namespace thisptr {
       }
 
       bool close() {
-        if (m_acceptor.is_open())
-          asio::post(m_acceptor.get_executor(), [this] { m_acceptor.cancel(); });
-
-        bool bWasOpen = false;
+        bool bWasOpen;
         if ((bWasOpen = m_socket.is_open()))
-          asio::post(m_context, [this]() {
+          asio::post(m_socket.get_executor(), [this]() {
             m_socket.close();
           });
-
-        m_context.stop();
-        if (m_thread.joinable())
-          m_thread.join();
 
         if (bWasOpen && m_handler)
           m_handler->onDisconnected(m_socket);
@@ -246,12 +241,8 @@ namespace thisptr {
 
     private:
       asio::streambuf m_buffer;
-      asio::io_context m_context;
-      std::thread m_thread;
 
       asio::ip::tcp::socket m_socket;
-      asio::ip::tcp::acceptor m_acceptor;
-
       handler_ptr m_handler;
     };
 
@@ -418,18 +409,10 @@ namespace thisptr {
       using socket_type = AsioTcpSocket<H>;
       using handler_ptr = std::shared_ptr<H>;
     public:
-      TcpServer(handler_ptr handler): m_sock(handler) {}
+      explicit TcpServer(handler_ptr handler) :m_handler(handler), m_acceptor(make_strand(m_contextHolder.ctx())) {}
 
       virtual ~TcpServer() {
         stop();
-      }
-
-      bool bind(const std::string& address, const std::string& port) {
-        return m_sock.bind(address, port);
-      }
-
-      std::shared_ptr<socket_type> accept() {
-        return m_sock.accept();
       }
 
       void start(const std::string& address, const std::string& port) {
@@ -443,14 +426,51 @@ namespace thisptr {
       }
 
       void stop() {
-        m_sock.close();
+        if (m_acceptor.is_open())
+          asio::post(m_acceptor.get_executor(), [this] { m_acceptor.cancel(); });
+
+        m_contextHolder.stop();
+      }
+
+      bool bind(const std::string& address, const std::string& port) {
+        try {
+          asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), std::stoi(port));
+          m_acceptor.open(endpoint.protocol());
+          m_acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+          m_acceptor.bind(endpoint);
+          m_acceptor.listen();
+
+          m_contextHolder.start();
+        } catch (std::exception& e) {
+          std::cerr << "exception occured on asio bind" << e.what() << std::endl;
+          return false;
+        }
+        return true;
+      }
+
+      std::shared_ptr<socket_type> accept() {
+
+        auto* sock = new asio::ip::tcp::socket(m_contextHolder.ctx());
+        m_acceptor.async_accept(*sock,
+                                [this, sock](std::error_code ec)
+                                {
+                                  if (ec)
+                                  {
+                                    std::cerr << "unable to accept connection, ec: " << ec << std::endl;
+                                    stop();
+                                  } else {
+                                    m_handler->onNewConnection(*sock);
+                                    accept();
+                                  }
+                                });
+
+        return nullptr;
       }
 
     protected:
-      Socket<socket_type> m_sock;
-
-      std::string m_address;
-      std::string m_port;
+      AsioContextHolder m_contextHolder;
+      asio::ip::tcp::acceptor m_acceptor;
+      handler_ptr m_handler;
     };
 
     template <typename H>
@@ -458,6 +478,9 @@ namespace thisptr {
 
     template <typename H>
     using AsyncTcpServer = TcpServer<AsioTcpSocket<H>, H>;
+
+    template <typename H>
+    using AsyncTcpClient = Socket<AsioTcpSocket<H>>;
   }
 }
 
