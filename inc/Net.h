@@ -109,7 +109,12 @@ namespace thisptr {
       using handler_ptr = std::shared_ptr<H>;
     public:
       explicit Socket(handler_ptr handler): m_sock(m_contextHolder.ctx(), handler) {}
+      Socket(): m_sock(m_contextHolder.ctx(), nullptr) {}
       ~Socket() { m_contextHolder.stop(); }
+
+      void setHandler(handler_ptr handler) {
+        m_sock.setHandler(handler);
+      }
 
       bool connect(const std::string& address, const std::string& port) {
         bool res = m_sock.connect(address, port);
