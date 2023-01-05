@@ -130,6 +130,11 @@ namespace thisptr {
         return m_sock.recv(len);
       }
 
+      int recv_until(const std::string& delimiter)
+      {
+        return m_sock.recv_until(delimiter);
+      }
+
       int send(const std::string& payload) {
         return m_sock.send(payload);
       }
@@ -204,18 +209,43 @@ namespace thisptr {
       }
 
       int recv(unsigned int len) {
+        if (m_buffer.in_avail() >= len)
+        {
+          asio::post(m_socket.get_executor(), [this, len]() {
+            std::string payload{
+                buffers_begin(m_buffer.data()),
+                buffers_begin(m_buffer.data()) + len};
+            m_buffer.consume(len);
+            m_handler->onDataReceived(m_socket, std::make_error_code(std::errc()), payload);
+          });
+          return 0;
+        }
+
+        unsigned int lenToRead = len;
+        if (m_buffer.in_avail() > 0)
+          lenToRead -= m_buffer.in_avail();
+
         asio::async_read(m_socket, m_buffer,
-                         asio::transfer_exactly(len),
-                         [this](std::error_code ec, std::size_t length){
-                           std::string payload;
-                           {
-                             std::stringstream ss;
-                             ss << &m_buffer;
-                             ss.flush();
-                             payload = ss.str();
-                           }
+                         asio::transfer_exactly(lenToRead),
+                         [this, len](std::error_code ec, std::size_t length){
+                           std::string payload{
+                               buffers_begin(m_buffer.data()),
+                               buffers_begin(m_buffer.data()) + len};
+                           m_buffer.consume(len);
                            m_handler->onDataReceived(m_socket, ec, payload);
                          });
+        return 0;
+      }
+
+      int recv_until(const std::string& delimiter) {
+        asio::async_read_until(m_socket, m_buffer, delimiter,
+                               [this, delimiter] (const std::error_code& ec, std::size_t length){
+                                 std::string payload{
+                                     buffers_begin(m_buffer.data()),
+                                     buffers_begin(m_buffer.data()) + length};
+                                 m_buffer.consume(length);
+                                 m_handler->onDataReceived(m_socket, ec, payload);
+        });
         return 0;
       }
 
