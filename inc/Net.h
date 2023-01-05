@@ -209,6 +209,9 @@ namespace thisptr {
       }
 
       int recv(unsigned int len) {
+        if (len == 0)
+          return 0;
+
         if (m_buffer.in_avail() >= len)
         {
           asio::post(m_socket.get_executor(), [this, len]() {
@@ -221,17 +224,17 @@ namespace thisptr {
           return 0;
         }
 
-        unsigned int lenToRead = len;
+        /*unsigned int lenToRead = len;
         if (m_buffer.in_avail() > 0)
-          lenToRead -= m_buffer.in_avail();
+          lenToRead -= m_buffer.in_avail();*/
 
         asio::async_read(m_socket, m_buffer,
-                         asio::transfer_exactly(lenToRead),
-                         [this, len](std::error_code ec, std::size_t length){
+                         asio::transfer_exactly(len),
+                         [this](std::error_code ec, std::size_t length){
                            std::string payload{
                                buffers_begin(m_buffer.data()),
-                               buffers_begin(m_buffer.data()) + len};
-                           m_buffer.consume(len);
+                               buffers_begin(m_buffer.data()) + length};
+                           m_buffer.consume(length);
                            m_handler->onDataReceived(m_socket, ec, payload);
                          });
         return 0;
