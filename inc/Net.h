@@ -333,6 +333,7 @@ namespace thisptr {
     public:
       virtual void onConnected(asio::ip::tcp::socket& sock, const std::string& endpoint) {}
       virtual void onDisconnected(asio::ip::tcp::socket& sock) {}
+      virtual void onServerDisconnected() {}
       virtual bool onDataReceived(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) = 0;
       virtual void onDataSent(asio::ip::tcp::socket& sock, std::error_code ec, const std::string& payload) = 0;
       virtual void onNewConnection(asio::ip::tcp::socket& sock) {}
@@ -468,6 +469,9 @@ namespace thisptr {
       }
 
       void start(const std::string& address, const std::string& port) {
+        if (!m_stopped)
+          return;
+
         if (!bind(address, port))
         {
           std::cout << "s : unable to bind to host" << std::endl;
@@ -481,6 +485,7 @@ namespace thisptr {
         } catch (std::exception& e) {
           std::cerr << "exception occured on asio bind" << e.what() << std::endl;
         }
+        m_stopped = false;
       }
 
       void waitForFinished() {
@@ -488,9 +493,15 @@ namespace thisptr {
       }
 
       void stop() {
+        if (m_stopped)
+          return;
+        m_stopped = true;
         if (m_acceptor.is_open())
-          asio::post(m_acceptor.get_executor(), [this] { m_acceptor.cancel(); });
+          asio::post(m_acceptor.get_executor(), [this] {
+            m_acceptor.cancel();
+          });
 
+        m_handler->onServerDisconnected();
         m_contextHolder.stop();
       }
 
@@ -526,6 +537,7 @@ namespace thisptr {
       AsioContextHolder m_contextHolder;
       asio::ip::tcp::acceptor m_acceptor;
       handler_ptr m_handler;
+      bool m_stopped {true};
     };
 
     template <typename H>
