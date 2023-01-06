@@ -76,7 +76,10 @@ namespace thisptr {
         m_running = true;
 
         try {
-          m_thread = std::thread([this](){ m_context.run(); });
+          for (size_t i = 0; i < m_workers; ++i) {
+            asio::post(m_pool, [this] { m_context.run(); });
+          }
+          m_waiting = false;
           return true;
         } catch (std::exception& e) {
           std::cerr << "exception occured on asio context start" << e.what() << std::endl;
@@ -84,23 +87,34 @@ namespace thisptr {
         return false;
       }
 
+      void waitForFinished() {
+        m_waiting = true;
+        m_pool.join();
+      }
+
       void stop() {
         if (!m_running)
           return;
         m_running = false;
         m_context.stop();
-        if (m_thread.joinable())
-          m_thread.join();
+        if (!m_waiting)
+          m_pool.join();
       }
 
       asio::io_context& ctx() {
         return m_context;
       }
 
+      void setWorkers(int workers) {
+        m_workers = workers;
+      }
+
     private:
       bool m_running {false};
       asio::io_context m_context;
-      std::thread m_thread;
+      asio::thread_pool m_pool;
+      int m_workers {1};
+      bool m_waiting {false};
     };
 
     template <typename H>
@@ -461,6 +475,16 @@ namespace thisptr {
         }
 
         accept();
+
+        try {
+          m_contextHolder.start();
+        } catch (std::exception& e) {
+          std::cerr << "exception occured on asio bind" << e.what() << std::endl;
+        }
+      }
+
+      void waitForFinished() {
+        m_contextHolder.waitForFinished();
       }
 
       void stop() {
@@ -471,18 +495,11 @@ namespace thisptr {
       }
 
       bool bind(const std::string& address, const std::string& port) {
-        try {
-          asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), std::stoi(port));
-          m_acceptor.open(endpoint.protocol());
-          m_acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
-          m_acceptor.bind(endpoint);
-          m_acceptor.listen();
-
-          m_contextHolder.start();
-        } catch (std::exception& e) {
-          std::cerr << "exception occured on asio bind" << e.what() << std::endl;
-          return false;
-        }
+        asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), std::stoi(port));
+        m_acceptor.open(endpoint.protocol());
+        m_acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+        m_acceptor.bind(endpoint);
+        m_acceptor.listen();
         return true;
       }
 
